@@ -2,7 +2,7 @@ use crate::{
     MAX_WIDTH,
     db::Database,
     domain::Filetype,
-    prompts::{get_filename, get_output_type, get_playlist},
+    prompts::{get_filename, get_output_dir, get_output_type, get_playlist},
     utils::{draw_box_fixed, get_config_path, truncate},
 };
 use anyhow::Result;
@@ -32,14 +32,15 @@ pub fn export() -> Result<()> {
     let output_type = get_output_type()?;
     let songs = db.fetch_songs(playlist.id)?;
 
-    let filename = get_filename(&playlist.name);
-    let path = get_config_path().join(format!("{}.{}", filename?, output_type.extension()));
+    let filename = get_filename(&playlist.name)?;
+    let output_dir = get_output_dir(&get_config_path())?;
+    let path = output_dir.join(format!("{}.{}", filename, output_type.extension()));
 
     output_type.export(&songs, &path)?;
     preview_output(&path, &output_type);
 
     println!(
-        " {} Wrote {} tracks from {} to\n\t{}\n",
+        " {} Wrote {} tracks from {} to\n\t{}",
         "SUCCESS!".yellow(),
         format!("{}", songs.len()).green(),
         playlist.name.cyan(),

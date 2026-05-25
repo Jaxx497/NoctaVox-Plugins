@@ -134,7 +134,7 @@ fn convert_from_bytes(raw_bytes: Vec<u8>) -> Result<u64> {
 pub const GET_PLAYLISTS: &str = r"
 SELECT id, name 
     FROM playlists 
-    ORDER BY updated_at DESC";
+    ORDER BY name COLLATE NOCASE ASC";
 
 pub const GET_PLAYLIST_SONGS: &str = r"
 SELECT 

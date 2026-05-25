@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: nv-transpose
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            name: linux-x64
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            name: linux-arm64
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            name: macos-x64
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            name: macos-arm64
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            name: windows-x64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p ${{ env.BIN_NAME }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          STAGE="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$STAGE"
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$STAGE/"
+          tar -czf "${STAGE}.tar.gz" "$STAGE"
+          shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $stage = "$env:BIN_NAME-$env:GITHUB_REF_NAME-${{ matrix.name }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          (Get-FileHash "$stage.zip" -Algorithm SHA256).Hash | Out-File "$stage.zip.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ env.BIN_NAME }}-${{ github.ref_name }}-${{ matrix.name }}.*
+
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          TITLE=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" {
+              sub("^## \\[" ver "\\][[:space:]]*", "")
+              sub("[[:space:]]+$", "")
+              print; exit
+            }
+          ' CHANGELOG.md)
+
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { p=1; next }
+            p && /^## / { exit }
+            p { print }
+          ' CHANGELOG.md > notes.md
+
+          if [[ ! -s notes.md ]]; then
+            echo "::error::No CHANGELOG section found for [$VERSION]"
+            exit 1
+          fi
+
+          if [[ -n "$TITLE" ]]; then
+            echo "FULL_TITLE=$GITHUB_REF_NAME — $TITLE" >> "$GITHUB_ENV"
+          else
+            echo "FULL_TITLE=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE=""
+          [[ "$GITHUB_REF_NAME" == *-* ]] && PRERELEASE="--prerelease"
+          gh release create "$GITHUB_REF_NAME" \
+            $PRERELEASE \
+            --title "$FULL_TITLE" \
+            --notes-file notes.md \
+            --repo "$GITHUB_REPOSITORY" \
+            artifacts/*

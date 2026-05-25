@@ -5,3 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
+
+[profile.release]
+  strip = true
+  lto = "thin"
+  codegen-units = 1
+  opt-level = 3

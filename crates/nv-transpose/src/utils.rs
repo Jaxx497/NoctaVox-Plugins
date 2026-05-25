@@ -45,9 +45,7 @@ pub(crate) fn truncate<S: AsRef<str>>(s: S, max: usize) -> String {
 
 pub fn list_playlists() -> Result<()> {
     let db = Database::open()?;
-    let mut playlists = db.fetch_playlists()?;
-
-    playlists.sort_by_key(|a| a.id);
+    let playlists = db.fetch_playlists()?;
 
     let format_raw = |id: i64, name: &str| format!("{:ID_COL$}.{:<GAP$}{}", id, "", name);
 
@@ -80,4 +78,22 @@ pub fn get_config_path() -> PathBuf {
     dirs::config_dir()
         .expect("Could not resolve config directory")
         .join(crate::CONFIG_DIRECTORY)
+}
+
+pub fn expand_tilde(input: &str) -> PathBuf {
+    let Some(rest) = input.strip_prefix('~') else {
+        return PathBuf::from(input);
+    };
+    let Some(home) = dirs::home_dir() else {
+        return PathBuf::from(input);
+    };
+    let rest = rest
+        .strip_prefix('/')
+        .or_else(|| rest.strip_prefix('\\'))
+        .unwrap_or(rest);
+    if rest.is_empty() {
+        home
+    } else {
+        home.join(rest)
+    }
 }
